@@ -11,7 +11,6 @@ REFERRAL_CODE="4bdd5692e072c6b9"  # Default referral code
 NODE_DIR=~/pipe-node
 PIPE_STATUS_SCRIPT_URL="https://raw.githubusercontent.com/abhiag/PipePoPDevNet/main/pipe_status.sh"
 PIPE_STATUS_SCRIPT="$NODE_DIR/pipe_status.sh"
-BACKUP_DIR=~/pipe-node-backups
 
 # Detect system's total RAM (in GB)
 TOTAL_RAM=$(free -g | awk '/^Mem:/ {print $2}')
@@ -36,40 +35,35 @@ EOF
     fi
 }
 
-# Function to backup node data
-backup_node_data() {
-    echo "🔄 Creating backup of node data..."
-    mkdir -p "$BACKUP_DIR"
-    timestamp=$(date +%Y%m%d%H%M%S)
-    backup_file="$BACKUP_DIR/pipe-node-backup-$timestamp.tar.gz"
-    
-    # Backup node info and logs
-    tar -czvf "$backup_file" "$NODE_INFO_FILE" "$NODE_DIR/pop.log"
-    
-    if [[ -f "$backup_file" ]]; then
-        echo "✅ Backup successful! Backup saved to: $backup_file"
+# Function to restore node_info.json from backup
+restore_node_info() {
+    read -p "🔄 Do you have a backup of node_info.json? (y/n): " RESTORE_CHOICE
+    if [[ "$RESTORE_CHOICE" == "y" ]]; then
+        read -p "📌 Enter your previous Node ID: " NODE_ID
+        read -p "🔑 Enter your authentication token: " TOKEN
+
+        # Save the restored info
+        cat <<EOF > "$NODE_INFO_FILE"
+{
+    "node_id": "$NODE_ID",
+    "registered": true,
+    "token": "$TOKEN"
+}
+EOF
+        echo "✅ Node info restored!"
     else
-        echo "❌ Backup failed!"
+        echo "⏩ Skipping restoration. Using existing or empty node_info.json."
     fi
 }
 
-# Function to start the node
-start_node() {
-    if [[ ! -f "$NODE_INFO_FILE" ]]; then
-        echo "❌ Node info not found! Please install or restore first."
-        return
+# Function to display node_info.json for backup
+backup_node_info() {
+    if [[ -f "$NODE_INFO_FILE" ]]; then
+        echo -e "\n📜 Contents of node_info.json (Copy and save this information):"
+        cat "$NODE_INFO_FILE"
+    else
+        echo -e "\n❌ node_info.json not found! Please install the node first."
     fi
-
-    PUBKEY=$(cat "$PUBKEY_FILE")
-    echo "🚀 Starting node..."
-    cd "$NODE_DIR"
-    sudo ./pop --ram "$RAM" --max-disk "$DISK" --cache-dir /data --pubKey "$PUBKEY" >> pop.log 2>&1 &
-    echo "✅ Node started."
-}
-
-# Function to pause the node
-pause_node() {
-    pkill pop && echo "⏸️ Node paused." || echo "❌ Node was not running."
 }
 
 # Function to install the node
@@ -83,7 +77,7 @@ install_node() {
     echo -e "\n📂 Setting up PiPe node directory..."
     mkdir -p "$NODE_DIR" && cd "$NODE_DIR"
 
-    echo -e "\n⬇️ Downloading PiPe Network node..."
+    echo -e "\n⬇️ Downloading PiPe Network node (pop)..."
     curl -L -o pop "https://dl.pipecdn.app/v0.2.8/pop"
 
     echo -e "\n🔧 Making binary executable..."
@@ -118,11 +112,31 @@ install_node() {
     echo -e "\n🚀 Starting PiPe Network node..."
     sudo ./pop --ram "$RAM" --max-disk "$DISK" --cache-dir /data --pubKey "$PUBKEY" &
 
-    # Add a cron job to check and restart pop every 2 minutes
+    # Add a cron job to check and restart pop every 5 minutes
     CRON_JOB="*/2 * * * * pgrep pop > /dev/null || (cd $NODE_DIR && sudo ./pop --ram $RAM --max-disk $DISK --cache-dir /data --pubKey \"\$(cat /root/.pubkey)\" &)"
     (crontab -l 2>/dev/null | grep -F "$CRON_JOB") || (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
 
     echo -e "\n✅ PiPe Node installation and setup completed!"
+}
+
+# Function to stop the node
+stop_node() {
+    if pgrep pop > /dev/null; then
+        echo -e "\n🛑 Stopping PiPe Network node..."
+        sudo pkill pop
+        echo "✅ PiPe Node stopped!"
+    else
+        echo -e "\n✅ PiPe Node is not running."
+    fi
+}
+
+# Function to restart the node
+restart_node() {
+    stop_node
+    echo -e "\n🔄 Restarting PiPe Network node..."
+    cd "$NODE_DIR"
+    sudo ./pop --ram "$RAM" --max-disk "$DISK" --cache-dir /data --pubKey "$PUBKEY" &
+    echo "✅ PiPe Node restarted!"
 }
 
 # Function to check node status using pipe_status.sh
@@ -135,29 +149,65 @@ check_node_status() {
     "$PIPE_STATUS_SCRIPT"
 }
 
+# Function to uninstall the node
+uninstall_node() {
+    echo -e "\n⚠️ Uninstalling PiPe Node..."
+    stop_node
+    rm -rf "$NODE_DIR"
+    crontab -l | grep -v "pgrep pop" | crontab -
+    echo "✅ PiPe Node uninstalled!"
+}
+
 # Main menu
 while true; do
+
     echo "==============================================================="
-    echo -e "\e[1;36m🚀🚀 PIPE NODE INSTALLER Tool-Kit \e[0m"
+    echo -e "\e[1;36m🚀🚀 PIPE NODE INSTALLER Tool-Kit BY GA-CRYPTO 🚀🚀\e[0m"
     echo "==============================================================="
-    echo -e "\e[1;85m📢 Stay updated\e[0m"
+    echo -e "\e[1;85m📢 Stay updated:\e[0m"
+    echo -e "\e[1;85m🔹 Telegram: https://t.me/GaCryptOfficial\e[0m"
+    echo -e "\e[1;85m🔹 X (Twitter): https://x.com/GACryptoO\e[0m"
+    echo "==============================================================="
 
     echo -e "\n📋 PiPe Node Management Menu:"
     echo "1. Install PiPe Node"
-    echo "2. Start Node"
-    echo "3. Pause Node"
-    echo "4. Backup Node Data"
-    echo "5. Check Node Status"
-    echo "6. Exit"
-    read -p "🔢 Choose an option (1-6): " CHOICE
+    echo "2. Check Node Status"
+    echo "3. Backup your Node Info"
+    echo "4. Restore Your Node Info"
+    echo "5. Start PiPe Node"
+    echo "6. Pause PiPe Node"
+    echo "7. Uninstall PiPe Node"
+    echo "8. Exit"
+    read -p "🔢 Choose an option (1-8): " CHOICE
 
     case $CHOICE in
-        1) install_node ;;
-        2) start_node ;;
-        3) pause_node ;;
-        4) backup_node_data ;;
-        5) check_node_status ;;
-        6) echo "👋 Exiting..."; exit 0 ;;
-        *) echo "❌ Invalid choice. Please try again." ;;
+        1)
+            install_node
+            ;;
+        2)
+            check_node_status
+            ;;
+        3)
+            backup_node_info
+            ;;
+        4)
+            restore_node_info
+            ;;
+        5)
+            restart_node
+            ;;
+        6)
+            stop_node
+            ;;
+        7)
+            uninstall_node
+            ;;
+        8)
+            echo -e "\n👋 Exiting..."
+            exit 0
+            ;;
+        *)
+            echo -e "\n❌ Invalid choice. Please try again."
+            ;;
     esac
 done
